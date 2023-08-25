@@ -11,24 +11,17 @@ phases:
 
   pre_build:
     commands:
-      - echo Logging in to Amazon EKS...
-      - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $AWS_CLUSTER_NAME
-      - echo check config 
-      - kubectl config view --minify
-      - echo check kubectl access
-      - kubectl get svc
       - echo Logging in to Amazon ECR...
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - IMAGE_TAG="$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)"
       - IMAGE_URI="${REPOSITORY_URI}:${IMAGE_TAG}"
       - echo "New image URI ${IMAGE_URI}"
-      
 
   build:
     commands:
       - echo Build started on `date`
       - echo Building the Docker image...
-      - cd app         
+      - cd app
       - docker build -t $IMAGE_URI .
       - echo Build completed on `date`
       - cd ..
@@ -37,6 +30,4 @@ phases:
     commands:
       - echo Pushing the Docker image...
       - docker push $IMAGE_URI
-      - echo Deploy the image tag $IMAGE_TAG on EKS cluster
-      - kubectl set image deployment/container-workshop-deployment container-workshop=$IMAGE_URI
-      - kubectl rollout restart -f app/k8s/manifests/deployment.yaml
+      - echo '[{"name":"ecs-workshop","imageUri":"'$IMAGE_URI'"}]' > imagedefinitions.json

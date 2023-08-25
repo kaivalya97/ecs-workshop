@@ -5,8 +5,8 @@ Resources:
     Type: AWS::ECR::Repository
     DeletionPolicy: Delete
     Properties:
-      RepositoryName: "awsugahm/container-workshop"
-      ImageScanningConfiguration: 
+      RepositoryName: "awsugahm/ecs-workshop"
+      ImageScanningConfiguration:
         ScanOnPush: true
       ImageTagMutability: IMMUTABLE
       EncryptionConfiguration:
@@ -33,8 +33,8 @@ Resources:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                  - ecr:GetAuthorizationToken     
-                  - eks:*                                    
+                  - ecr:GetAuthorizationToken
+                  - ecs:*
               - Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
                 Effect: Allow
                 Action:
@@ -77,7 +77,7 @@ Resources:
                   - s3:GetBucketVersioning
               - Resource: "*"
                 Effect: Allow
-                Action:                  
+                Action:
                   - codebuild:StartBuild
                   - codebuild:BatchGetBuilds
                   - iam:PassRole
@@ -86,13 +86,13 @@ Resources:
                   - states:DescribeExecution
               - Resource: "*"
                 Effect: Allow
-                Action:                  
+                Action:
                   - codecommit:CancelUploadArchive
                   - codecommit:GetBranch
                   - codecommit:GetCommit
                   - codecommit:GetUploadArchiveStatus
                   - codecommit:UploadArchive
-            
+
   ArtifactBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
@@ -115,11 +115,11 @@ Resources:
           - Name: AWS_DEFAULT_REGION
             Value: !Ref AWS::Region
           - Name: AWS_CLUSTER_NAME
-            Value: container-workshop
+            Value: ecs-workshop
           - Name: REPOSITORY_URI
             Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}
       Name: !Ref AWS::StackName
-      ServiceRole: !Ref CodeBuildServiceRole  
+      ServiceRole: !Ref CodeBuildServiceRole
   CodePipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -131,22 +131,22 @@ Resources:
         - Name: GetSource
           Actions:
             - Name: source
-              RunOrder: 1       
+              RunOrder: 1
               ActionTypeId:
                 Version: '1'
                 Provider: CodeCommit
                 Category: Source
                 Owner: AWS
               Configuration:
-                RepositoryName: container-workshop
+                RepositoryName: ecs-workshop
                 BranchName: main
                 PollForSourceChanges: 'true'
               OutputArtifacts:
-                - Name: container-workshop-source-artifact
+                - Name: ecs-workshop-source-artifact
         - Name: BuildAndDeployContainerImage
           Actions:
             - Name: BuildAndDeployContainerImage
-              RunOrder: 1          
+              RunOrder: 1
               ActionTypeId:
                 Category: Build
                 Owner: AWS
@@ -155,15 +155,104 @@ Resources:
               Configuration:
                 ProjectName: !Ref CodeBuildProject
               InputArtifacts:
-                - Name: container-workshop-source-artifact
+                - Name: ecs-workshop-source-artifact
               OutputArtifacts:
                 - Name: BuildOutputImage
-
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties: 
+      CapacityProviders: 
+        - Fargate
+      ClusterName: ecs-workshop
+      Configuration: 
+        ClusterConfiguration
+  EcsService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref EcsCluster
+      DesiredCount: '1'
+      Role: !Ref EcsServiceRole
+      TaskDefinition: !Ref taskdefinition
+  taskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Join 
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-ecs-workshop'
+      ContainerDefinitions:
+        - Name: simple-app
+          Cpu: '10'
+          Essential: 'true'
+          Image: 'httpd:2.4'
+          Memory: '300'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: ecs-workshop
+          MountPoints:
+            - ContainerPath: /usr/local/apache2/htdocs
+              SourceVolume: my-vol
+          PortMappings:
+            - ContainerPort: 80
+        - Name: busybox
+          Cpu: 10
+          Command:
+            - >-
+              /bin/sh -c "while true; do echo '<html> <head> <title>Amazon ECS
+              Sample App</title> <style>body {margin-top: 40px;
+              background-color: #333;} </style> </head><body> <div
+              style=color:white;text-align:center> <h1>Amazon ECS Sample
+              App</h1> <h2>Congratulations!</h2> <p>Your application is now
+              running on a container in Amazon ECS.</p>' > top; /bin/date > date
+              ; echo '</div></body></html>' > bottom; cat top date bottom >
+              /usr/local/apache2/htdocs/index.html ; sleep 1; done"
+          EntryPoint:
+            - sh
+            - '-c'
+          Essential: false
+          Image: busybox
+          Memory: 200
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: ecs-workshop
+          VolumesFrom:
+            - SourceContainer: simple-app
+      Volumes:
+        - Name: my-vol
+  EcsServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: ecs-service
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'elasticloadbalancing:DeregisterInstancesFromLoadBalancer'
+                  - 'elasticloadbalancing:DeregisterTargets'
+                  - 'elasticloadbalancing:Describe*'
+                  - 'elasticloadbalancing:RegisterInstancesWithLoadBalancer'
+                  - 'elasticloadbalancing:RegisterTargets'
+                  - 'ec2:Describe*'
+                  - 'ec2:AuthorizeSecurityGroupIngress'
+                Resource: '*'
 Outputs:
   PipelineUrl:
     Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${CodePipeline}
   ArtifactBucket:
     Value: !Ref ArtifactBucket
   CodeBuildServiceRoleARN:
-    Value: !GetAtt CodeBuildServiceRole.Arn 
-  
+    Value: !GetAtt CodeBuildServiceRole.Arn
