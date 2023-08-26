@@ -1,23 +1,22 @@
 Resources:
+
+  Repository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Delete
+    Properties:
+      RepositoryName: ecr-repo
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: MUTABLE
+      EncryptionConfiguration:
+        EncryptionType: KMS
+
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
+      Path: /
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - codepipeline.amazonaws.com
-            Action:
-              - sts:AssumeRole
-
-  CodePipelinePolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      Roles: [ !Ref CodePipelineRole ]
-      PolicyDocument:
-        Version: "2012-10-17"
+        Version: 2012-10-17
         Statement:
           - Effect: Allow
             Principal:
@@ -28,26 +27,17 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              - Resource:
-                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
-                Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                  - s3:GetObjectVersion
-                  - s3:GetBucketVersioning
               - Resource: "*"
                 Effect: Allow
                 Action:
+                  - s3:*
+                  - ecs:*
                   - codebuild:StartBuild
                   - codebuild:BatchGetBuilds
                   - iam:PassRole
                   - states:DescribeStateMachine
                   - states:StartExecution
                   - states:DescribeExecution
-              - Resource: "*"
-                Effect: Allow
-                Action:
                   - codecommit:CancelUploadArchive
                   - codecommit:GetBranch
                   - codecommit:GetCommit
@@ -62,6 +52,9 @@ Resources:
     Type: AWS::CodePipeline::Pipeline
     Properties:
       RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
       Stages:
         - Name: GetSource
           Actions:
@@ -73,11 +66,11 @@ Resources:
                 Category: Source
                 Owner: AWS
               Configuration:
-                RepositoryName: ecs-workshop
-                BranchName: main
+                RepositoryName: ecs-codecommit
+                BranchName: master
                 PollForSourceChanges: 'true'
               OutputArtifacts:
-                - Name: ecs-workshop-source-artifact
+                - Name: SourceArtifact
 
         - Name: Build
           Actions:
@@ -107,7 +100,7 @@ Resources:
               Configuration:
                 ClusterName: !Ref ECSCluster
                 ServiceName: !Ref FargateService
-                FileName: imagedefinitions.json # Set in post_build step
+                FileName: imagedefinitions.json # This is set in post_build step
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -168,8 +161,6 @@ Resources:
             Value: !Ref AWS::AccountId
           - Name: AWS_DEFAULT_REGION
             Value: !Ref AWS::Region
-          - Name: AWS_CLUSTER_NAME
-            Value: ecs-workshop
           - Name: REPOSITORY_URI
             Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}
       Name: !Ref AWS::StackName
@@ -187,13 +178,27 @@ Resources:
                 - codedeploy.amazonaws.com
             Action:
               - sts:AssumeRole
-
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ecr:*
+                  - ecs:*
+                  - s3:*
 
   ECSCluster:
     Type: "AWS::ECS::Cluster"
 
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
+    DependsOn: CodeBuildProject
     Properties:
       Family: "MyTaskDefinition"
       NetworkMode: "awsvpc"
@@ -203,8 +208,8 @@ Resources:
       Memory: "512"
       ExecutionRoleArn: !Ref ECSTaskExecutionRole
       ContainerDefinitions:
-        - Name: "MyContainer"
-          Image: "my-account.dkr.ecr.region.amazonaws.com/my-image:latest" # Replace with the ECR image URL
+        - Name: "ecs-workshop"
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}:latest
           PortMappings:
             - ContainerPort: 8080
 
@@ -233,13 +238,15 @@ Resources:
                   - "ecs:StartTask"
                   - "ecs:StopTask"
                   - "ecs:UpdateCluster"
+                  - "ecr:*"
+                  - "s3:*"
                 Resource: "*"
 
   FargateService:
     Type: "AWS::ECS::Service"
     Properties:
       Cluster: !Ref ECSCluster
-      DesiredCount: 1
+      DesiredCount: 0
       LaunchType: "FARGATE"
       TaskDefinition: !Ref TaskDefinition
       NetworkConfiguration:
@@ -248,16 +255,16 @@ Resources:
           SecurityGroups:
             - !Ref SecurityGroup
           Subnets:
-            - "subnet-abcdef123" # Replace with your VPC Subnet IDs
-            - "subnet-ghijkl456"
+            - "subnet-0f2af129ba17dd92f" # Replace with your VPC Subnet IDs
+            - "subnet-024573f3780ba86ca"
 
   SecurityGroup:
     Type: "AWS::EC2::SecurityGroup"
     Properties:
       GroupDescription: "ECS Service Security Group"
-      VpcId: "vpc-xyz789xyz" # Replace with your VPC ID
+      VpcId: "vpc-0acf482e4ec8e5602" # Replace with your VPC ID
       SecurityGroupIngress:
-        - CidrIp: "0.0.0.0/0"  # This allows all inbound traffic, restrict as needed
+        - CidrIp: "0.0.0.0/0"
           IpProtocol: "tcp"
-          FromPort: 80
-          ToPort: 80
+          FromPort: 0
+          ToPort: 65535

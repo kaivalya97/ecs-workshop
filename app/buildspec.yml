@@ -15,6 +15,7 @@ phases:
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - IMAGE_TAG="$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)"
       - IMAGE_URI="${REPOSITORY_URI}:${IMAGE_TAG}"
+      - IMAGE_LATEST="${REPOSITORY_URI}:latest"
       - echo "New image URI ${IMAGE_URI}"
 
   build:
@@ -23,6 +24,7 @@ phases:
       - echo Building the Docker image...
       - cd app
       - docker build -t $IMAGE_URI .
+      - docker tag $IMAGE_URI $IMAGE_LATEST
       - echo Build completed on `date`
       - cd ..
 
@@ -30,4 +32,9 @@ phases:
     commands:
       - echo Pushing the Docker image...
       - docker push $IMAGE_URI
+      - docker push $IMAGE_LATEST
       - echo '[{"name":"ecs-workshop","imageUri":"'$IMAGE_URI'"}]' > imagedefinitions.json
+
+artifacts:
+    files:
+        - imagedefinitions.json

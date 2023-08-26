@@ -12,19 +12,12 @@
 
 ```bash
 $ aws configure --profile ecs-workshop
-AWS Access Key ID: <Provided-by-AWS-admin>
-AWS Secret Access Key: <Provided-by-AWS-admin>
+AWS Access Key ID: <COPY FROM CLOUDKIDA>
+AWS Secret Access Key: <COPY FROM CLOUDKIDA>
 Default region name: us-east-1
 Default output format: None
 ```
 
-   
-# Clone the github repository
+(1.b) Prepare CodeCommit Repository
 
-(2.a) Clone the git repository containing code samples for app and infra.  
-
-```bash
-$ mkdir -p ~/awsug-ecs-workshop/{github,codecommit}
-$ cd github
-$ git clone https://github.com/kaivalya97/ecs-workshop.git
-```
+Oepn the file `infra/codepipeline/pipeline.yml` and enter VPC ID, Subnet IDs
